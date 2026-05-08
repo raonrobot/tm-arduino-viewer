@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>티처블 머신 & 시리얼 모니터 통합 뷰어</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; background-color: #e9ecef; margin: 0; padding: 20px; display: flex; justify-content: center; height: 100vh; box-sizing: border-box; }
+        h2 { text-align: center; color: #333; margin-top: 0; margin-bottom: 20px; }
+        .main-wrapper { display: flex; gap: 20px; width: 100%; max-width: 1200px; height: 100%; }
+        .panel { background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
+        .left-panel { flex: 1; overflow-y: auto; }
+        .right-panel { flex: 1; }
+        .control-group { margin-bottom: 15px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background-color: #fafafa; }
+        input[type="text"] { width: calc(100% - 70px); padding: 8px; margin-right: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { padding: 8px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s; }
+        button:hover { background-color: #0056b3; }
+        
+        .serial-button-group { display: flex; gap: 10px; margin-bottom: 15px; margin-top: 5px; }
+        .btn-connect { flex: 1; background-color: #28a745; color: white; border: none; border-radius: 4px; padding: 12px; font-size: 15px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        .btn-connect:hover:not(:disabled) { background-color: #218838; }
+        .btn-disconnect { flex: 1; background-color: #dc3545; color: white; border: none; border-radius: 4px; padding: 12px; font-size: 15px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        .btn-disconnect:hover:not(:disabled) { background-color: #c82333; }
+        .btn-connect:disabled, .btn-disconnect:disabled { background-color: #6c757d; cursor: not-allowed; opacity: 0.7; }
+
+        #webcam-container { text-align: center; background-color: #000; border-radius: 8px; overflow: hidden; min-height: 250px; display: flex; align-items: center; justify-content: center; margin-bottom: 15px; }
+        canvas { display: block; max-width: 100%; height: auto; }
+        
+        .serial-header { display: flex; gap: 10px; margin-bottom: 10px; }
+        .serial-header input { flex: 1; width: auto; }
+        .serial-output { flex-grow: 1; background-color: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 10px; font-family: 'Consolas', 'Courier New', monospace; font-size: 14px; overflow-y: auto; white-space: pre-wrap; height: 300px; resize: none; margin-bottom: 10px; }
+        
+        .serial-footer { display: flex; justify-content: space-between; align-items: center; }
+        .checkbox-group { display: flex; align-items: center; font-size: 14px; }
+        .checkbox-group input { margin-right: 5px; }
+        .footer-controls { display: flex; gap: 10px; align-items: center; }
+        .baudrate-select { padding: 7px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; outline: none; }
+        
+        .camera-control { display: flex; justify-content: space-between; align-items: center; }
+        .camera-label { font-size: 15px; color: #444; word-break: break-all; padding-right: 10px;}
+
+        .result-item { display: flex; padding: 10px; border-bottom: 1px solid #eee; font-size: 15px; align-items: center; }
+        .result-item:last-child { border-bottom: none; }
+        .header-row { font-weight: bold; background-color: #f1f3f5; border-bottom: 2px solid #ccc; border-radius: 4px 4px 0 0; }
+        
+        .col-num { flex: 0.5; text-align: center; color: #555;}
+        .col-name { flex: 2; text-align: center; }
+        .col-prob { flex: 0.8; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="main-wrapper">
+    <!-- 왼쪽 패널 -->
+    <div class="panel left-panel">
+        <h2>티처블 머신 설정</h2>
+
+        <div class="control-group">
+            <label for="model-link"><strong>모델 링크 입력</strong></label><br>
+            <div style="display: flex; margin-top: 8px;">
+                <input type="text" id="model-link" value="" placeholder="https://teachablemachine.../models/...">
+                <button id="apply-btn" onclick="initModel()">적용</button>
+            </div>
+        </div>
+
+        <div class="control-group camera-control">
+            <div class="camera-label" id="current-camera-label">
+                <strong>현재 카메라:</strong> 적용 버튼을 눌러주세요
+            </div>
+            <button onclick="changeCamera()" style="white-space: nowrap;">카메라 변경</button>
+        </div>
+
+        <div class="serial-button-group">
+            <button id="btn-connect" class="btn-connect" onclick="connectSerial()">아두이노 연결</button>
+            <button id="btn-disconnect" class="btn-disconnect" onclick="disconnectSerial()" disabled>연결 끊기</button>
+        </div>
+
+        <div id="webcam-container">
+            <span style="color:white; font-size: 14px;">카메라 화면이 여기에 표시됩니다.</span>
+        </div>
+
+        <div id="label-container"></div>
+    </div>
+
+    <!-- 오른쪽 패널 -->
+    <div class="panel right-panel">
+        <h2>시리얼 모니터</h2>
+        
+        <div class="serial-header">
+            <input type="text" id="serial-input" placeholder="아두이노로 보낼 메시지 입력..." onkeypress="handleEnter(event)">
+            <button onclick="sendManualMessage()">전송</button>
+        </div>
+
+        <div class="serial-output" id="serial-output"></div>
+
+        <div class="serial-footer">
+            <div class="checkbox-group">
+                <input type="checkbox" id="autoscroll" checked>
+                <label for="autoscroll" style="margin-right: 15px;">자동 스크롤</label>
+                
+                <input type="checkbox" id="timestamp" checked>
+                <label for="timestamp">타임스탬프 표시</label>
+            </div>
+            
+            <div class="footer-controls">
+                <select id="baudrate-select" class="baudrate-select">
+                    <option value="300">300 baud</option>
+                    <option value="600">600 baud</option>
+                    <option value="750">750 baud</option>
+                    <option value="1200">1200 baud</option>
+                    <option value="4800">4800 baud</option>
+                    <option value="9600" selected>9600 baud</option>
+                    <option value="19200">19200 baud</option>
+                    <option value="31250">31250 baud</option>
+                    <option value="38400">38400 baud</option>
+                    <option value="57600">57600 baud</option>
+                    <option value="74880">74880 baud</option>
+                    <option value="115200">115200 baud</option>
+                    <option value="230400">230400 baud</option>
+                    <option value="250000">250000 baud</option>
+                    <option value="460800">460800 baud</option>
+                    <option value="500000">500000 baud</option>
+                    <option value="921600">921600 baud</option>
+                    <option value="1000000">1000000 baud</option>
+                    <option value="2000000">2000000 baud</option>
+                </select>
+                <button onclick="clearMonitor()" style="background-color: #6c757d;">출력 지우기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let model, webcam, labelContainer, maxPredictions;
+    let isWebcamRunning = false;
+    
+    let videoDevices = [];
+    let currentDeviceIndex = 0;
+    
+    let useFallbackEnv = false; 
+
+    let serialPort, serialWriter, serialReader;
+    let readableStreamClosed, writableStreamClosed;
+    let keepReading = true;
+
+    let isNewLine = true;
+
+    async function initModel() {
+        const urlInput = document.getElementById("model-link").value.trim();
+        if(!urlInput) {
+            alert("모델 링크를 입력해주세요.");
+            return;
+        }
+
+        const URL = urlInput.endsWith('/') ? urlInput : urlInput + '/';
+        const modelURL = URL + "model.json";
+        const metadataURL = URL + "metadata.json";
+
+        try {
+            model = await tmImage.load(modelURL, metadataURL);
+            maxPredictions = model.getTotalClasses();
+
+            webcam = new tmImage.Webcam(350, 350, true); 
+            await webcam.setup(); 
+
+            let activeDeviceId = "";
+            if (webcam.webcam && webcam.webcam.srcObject) {
+                activeDeviceId = webcam.webcam.srcObject.getVideoTracks()[0].getSettings().deviceId;
+            }
+
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            videoDevices = devices.filter(device => device.kind === 'videoinput').map(device => {
+                return { deviceId: device.deviceId, label: device.label || "알 수 없는 카메라" };
+            });
+
+            currentDeviceIndex = videoDevices.findIndex(d => d.deviceId === activeDeviceId);
+            if (currentDeviceIndex === -1) currentDeviceIndex = 0;
+            
+            await webcam.play();
+            isWebcamRunning = true;
+
+            const webcamContainer = document.getElementById("webcam-container");
+            webcamContainer.innerHTML = '';
+            webcamContainer.appendChild(webcam.canvas);
+
+            updateCameraLabel(); 
+            window.requestAnimationFrame(loop);
+
+            labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = `
+                <div class="result-item header-row">
+                    <span class="col-num">번호</span>
+                    <span class="col-name">클래스</span>
+                    <span class="col-prob">인식률</span>
+                </div>
+            `;
+            
+            for (let i = 0; i < maxPredictions; i++) {
+                let div = document.createElement("div");
+                div.className = "result-item";
+                labelContainer.appendChild(div);
+            }
+            appendToMonitor("[시스템] 모델 및 카메라 로드 완료.\n");
+        } catch (error) {
+            alert("모델을 불러오거나 카메라를 시작하는데 실패했습니다. 권한을 확인해주세요.");
+            console.error(error);
+        }
+    }
+
+    function updateCameraLabel() {
+        const labelEl = document.getElementById("current-camera-label");
+        let deviceName = "알 수 없는 카메라";
+
+        if (webcam && webcam.webcam && webcam.webcam.srcObject) {
+            const track = webcam.webcam.srcObject.getVideoTracks()[0];
+            if (track && track.label) {
+                deviceName = track.label;
+            }
+        }
+        
+        if (deviceName === "알 수 없는 카메라" || deviceName === "") {
+            if (videoDevices.length > 0 && videoDevices[currentDeviceIndex]) {
+                deviceName = videoDevices[currentDeviceIndex].label || `카메라 ${currentDeviceIndex + 1}`;
+            }
+        }
+
+        // [추가된 정규표현식] 괄호와 그 안의 내용(예: (046d:082d))을 삭제하고 앞뒤 공백 제거
+        deviceName = deviceName.replace(/\s*\([^)]*\)/g, '').trim();
+
+        labelEl.innerHTML = `<strong>현재 카메라:</strong> <span style="color:#007bff; font-weight:bold;">${deviceName}</span>`;
+        return deviceName; 
+    }
+
+    async function changeCamera() {
+        if (!model || !isWebcamRunning) {
+            alert("먼저 모델 링크를 입력하고 [적용] 버튼을 눌러주세요.");
+            return;
+        }
+
+        if (webcam && webcam.webcam && webcam.webcam.srcObject) {
+            webcam.webcam.srcObject.getVideoTracks().forEach(track => track.stop());
+        }
+        if (webcam) webcam.stop();
+
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        videoDevices = devices.filter(device => device.kind === 'videoinput').map(device => {
+            return { deviceId: device.deviceId, label: device.label || "알 수 없는 카메라" };
+        });
+
+        if (videoDevices.length <= 1) {
+            useFallbackEnv = !useFallbackEnv;
+            webcam = new tmImage.Webcam(350, 350, true);
+            try {
+                await webcam.setup({ facingMode: useFallbackEnv ? "environment" : "user" });
+            } catch (err) {
+                useFallbackEnv = !useFallbackEnv; 
+                await webcam.setup({ facingMode: useFallbackEnv ? "environment" : "user" });
+                alert("다른 카메라 하드웨어에 접근할 수 없습니다.\n(USB 연결이나 윈도우 카메라 개인정보 설정이 막혀있는지 확인해주세요.)");
+                return;
+            }
+        } else {
+            currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length;
+            const newDeviceId = videoDevices[currentDeviceIndex].deviceId;
+
+            webcam = new tmImage.Webcam(350, 350, true); 
+            await webcam.setup({ deviceId: newDeviceId }); 
+        }
+
+        await webcam.play();
+        isWebcamRunning = true;
+
+        const webcamContainer = document.getElementById("webcam-container");
+        webcamContainer.innerHTML = '';
+        webcamContainer.appendChild(webcam.canvas);
+
+        const newCameraName = updateCameraLabel();
+        window.requestAnimationFrame(loop);
+        
+        appendToMonitor(`[시스템] 카메라가 변경되었습니다: ${newCameraName}\n`);
+    }
+
+    async function loop() {
+        if (isWebcamRunning) {
+            webcam.update(); 
+            await predict();
+            window.requestAnimationFrame(loop);
+        }
+    }
+
+    async function predict() {
+        const predictions = await model.predict(webcam.canvas);
+        
+        let highestProb = 0;
+        let bestIndex = -1;
+        let bestClassName = ""; 
+
+        for (let i = 0; i < maxPredictions; i++) {
+            const classNumber = i + 1;
+            const className = predictions[i].className;
+            const probability = (predictions[i].probability * 100).toFixed(2);
+            
+            const classPrediction = `<span class="col-num">${classNumber}</span> 
+                                     <span class="col-name"><b>${className}</b></span> 
+                                     <span class="col-prob">${probability}%</span>`;
+            
+            labelContainer.children[i + 1].innerHTML = classPrediction;
+
+            if (predictions[i].probability > highestProb) {
+                highestProb = predictions[i].probability;
+                bestIndex = i;
+                bestClassName = className; 
+            }
+        }
+
+        if (serialWriter && highestProb > 0.85) {
+            const classToSend = (bestIndex + 1).toString();
+            sendToArduino(classToSend, bestClassName); 
+        }
+    }
+
+    // ---------------------------------------------------------
+    // 시리얼 통신 기능
+    // ---------------------------------------------------------
+    async function connectSerial() {
+        if (!navigator.serial) {
+            alert("웹 시리얼 통신을 지원하지 않는 브라우저입니다. 크롬이나 엣지를 사용해주세요.");
+            return;
+        }
+        try {
+            const selectedBaudRate = parseInt(document.getElementById('baudrate-select').value);
+            
+            serialPort = await navigator.serial.requestPort();
+            await serialPort.open({ baudRate: selectedBaudRate }); 
+            
+            const textEncoder = new TextEncoderStream();
+            writableStreamClosed = textEncoder.readable.pipeTo(serialPort.writable);
+            serialWriter = textEncoder.writable.getWriter();
+            
+            const textDecoder = new TextDecoderStream();
+            readableStreamClosed = serialPort.readable.pipeTo(textDecoder.writable);
+            serialReader = textDecoder.readable.getReader();
+            
+            appendToMonitor(`[시스템] 아두이노와 연결 성공! (BaudRate: ${selectedBaudRate})\n`);
+            
+            document.getElementById('btn-connect').disabled = true;
+            document.getElementById('btn-disconnect').disabled = false;
+            document.getElementById('baudrate-select').disabled = true; 
+
+            keepReading = true;
+            readLoop();
+        } catch (err) {
+            console.error('시리얼 연결 실패:', err);
+            let errorMsg = `[에러] 시리얼 연결에 실패했습니다. (${err.name})\n`;
+            
+            if (err.name === 'NotFoundError') {
+                errorMsg += "  -> 사용자가 포트 선택 창을 취소했습니다.\n";
+            } else if (err.name === 'NetworkError' || err.message.includes('open')) {
+                errorMsg += "  -> ⚠️ 포트가 이미 사용 중입니다!\n";
+                errorMsg += "  -> 해결방법: 아두이노 IDE의 '시리얼 모니터' 창이 켜져있다면 닫아주세요.\n";
+                alert("아두이노 IDE의 시리얼 모니터가 켜져 있어서 연결할 수 없습니다. 모니터 창을 닫고 다시 시도해 주세요.");
+            }
+            
+            appendToMonitor(errorMsg);
+        }
+    }
+
+    async function disconnectSerial() {
+        if (!serialPort) return;
+        
+        keepReading = false;
+        
+        try {
+            if (serialReader) {
+                await serialReader.cancel();
+                await readableStreamClosed.catch(() => {});
+                serialReader = null;
+            }
+            
+            if (serialWriter) {
+                await serialWriter.close();
+                await writableStreamClosed.catch(() => {});
+                serialWriter = null;
+            }
+            
+            await serialPort.close();
+            serialPort = null;
+            
+            appendToMonitor("[시스템] 시리얼 연결이 안전하게 해제되었습니다.\n");
+        } catch (err) {
+            console.error("연결 해제 에러:", err);
+            appendToMonitor("[에러] 연결 해제 중 문제가 발생했습니다.\n");
+        } finally {
+            document.getElementById('btn-connect').disabled = false;
+            document.getElementById('btn-disconnect').disabled = true;
+            document.getElementById('baudrate-select').disabled = false;
+        }
+    }
+
+    async function readLoop() {
+        while (keepReading && serialPort && serialPort.readable) {
+            try {
+                const { value, done } = await serialReader.read();
+                if (done) {
+                    serialReader.releaseLock();
+                    break;
+                }
+                if (value) appendToMonitor(value);
+            } catch (error) {
+                console.error("읽기 에러:", error);
+                break;
+            }
+        }
+    }
+
+    let lastSent = "";
+    async function sendToArduino(data, className) {
+        if (serialWriter && data !== lastSent) {
+            try {
+                await serialWriter.write(data + '\n');
+                appendToMonitor(`[TM -> Arduino] "${className}"\n`); 
+                lastSent = data;
+            } catch (e) {
+                console.error("전송 에러:", e);
+            }
+        }
+    }
+
+    async function sendManualMessage() {
+        const input = document.getElementById('serial-input');
+        const msg = input.value;
+        if (msg && serialWriter) {
+            try {
+                await serialWriter.write(msg + '\n');
+                appendToMonitor(`[수동 전송] ${msg}\n`);
+                input.value = '';
+            } catch(e) {
+                console.error("수동 전송 에러:", e);
+            }
+        } else if (!serialWriter) {
+            alert("먼저 아두이노와 시리얼을 연결해주세요.");
+        }
+    }
+
+    function handleEnter(e) {
+        if (e.key === 'Enter') sendManualMessage();
+    }
+
+    function appendToMonitor(text) {
+        const output = document.getElementById('serial-output');
+        const showTimestamp = document.getElementById('timestamp').checked;
+        
+        let formattedText = "";
+        
+        for (let i = 0; i < text.length; i++) {
+            if (isNewLine && showTimestamp) {
+                const now = new Date();
+                const hours = String(now.getHours()).padStart(2, '0');
+                const minutes = String(now.getMinutes()).padStart(2, '0');
+                const seconds = String(now.getSeconds()).padStart(2, '0');
+                
+                formattedText += `[${hours}:${minutes}:${seconds}] -> `;
+                isNewLine = false; 
+            }
+            
+            formattedText += text[i];
+            
+            if (text[i] === '\n') {
+                isNewLine = true;
+            }
+        }
+        
+        output.textContent += formattedText;
+        
+        if (document.getElementById('autoscroll').checked) {
+            output.scrollTop = output.scrollHeight;
+        }
+    }
+
+    function clearMonitor() {
+        document.getElementById('serial-output').textContent = '';
+        isNewLine = true; 
+    }
+</script>
+
+</body>
+</html>
