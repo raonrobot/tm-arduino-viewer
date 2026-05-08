@@ -10,10 +10,15 @@
     <style>
         body { font-family: 'Malgun Gothic', sans-serif; background-color: #e9ecef; margin: 0; padding: 20px; display: flex; justify-content: center; height: 100vh; box-sizing: border-box; }
         h2 { text-align: center; color: #333; margin-top: 0; margin-bottom: 20px; }
-        .main-wrapper { display: flex; gap: 20px; width: 100%; max-width: 1200px; height: 100%; }
+        
+        /* 전체 컨테이너 너비 확장 (1200px -> 1400px) */
+        .main-wrapper { display: flex; gap: 20px; width: 100%; max-width: 1400px; height: 100%; }
         .panel { background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
+        
+        /* 왼쪽 패널과 오른쪽 패널의 비율을 1 : 1.5 로 수정 */
         .left-panel { flex: 1; overflow-y: auto; }
-        .right-panel { flex: 1; }
+        .right-panel { flex: 1.5; }
+        
         .control-group { margin-bottom: 15px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background-color: #fafafa; }
         input[type="text"] { width: calc(100% - 70px); padding: 8px; margin-right: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
         button { padding: 8px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s; }
@@ -227,7 +232,6 @@
             }
         }
 
-        // [추가된 정규표현식] 괄호와 그 안의 내용(예: (046d:082d))을 삭제하고 앞뒤 공백 제거
         deviceName = deviceName.replace(/\s*\([^)]*\)/g, '').trim();
 
         labelEl.innerHTML = `<strong>현재 카메라:</strong> <span style="color:#007bff; font-weight:bold;">${deviceName}</span>`;
@@ -360,7 +364,7 @@
             if (err.name === 'NotFoundError') {
                 errorMsg += "  -> 사용자가 포트 선택 창을 취소했습니다.\n";
             } else if (err.name === 'NetworkError' || err.message.includes('open')) {
-                errorMsg += "  -> ⚠️ 포트가 이미 사용 중입니다!\n";
+                errorMsg += "  -> 포트가 이미 사용 중입니다!\n";
                 errorMsg += "  -> 해결방법: 아두이노 IDE의 '시리얼 모니터' 창이 켜져있다면 닫아주세요.\n";
                 alert("아두이노 IDE의 시리얼 모니터가 켜져 있어서 연결할 수 없습니다. 모니터 창을 닫고 다시 시도해 주세요.");
             }
@@ -390,7 +394,7 @@
             await serialPort.close();
             serialPort = null;
             
-            appendToMonitor("[시스템] 시리얼 연결이 안전하게 해제되었습니다.\n");
+            appendToMonitor("[시스템] 아두이노와 시리얼 연결이 안전하게 해제되었습니다.\n");
         } catch (err) {
             console.error("연결 해제 에러:", err);
             appendToMonitor("[에러] 연결 해제 중 문제가 발생했습니다.\n");
@@ -422,7 +426,11 @@
         if (serialWriter && data !== lastSent) {
             try {
                 await serialWriter.write(data + '\n');
-                appendToMonitor(`[TM -> Arduino] "${className}"\n`); 
+                
+                const decValue = data.charCodeAt(0); 
+                
+                appendToMonitor(`[TM -> Arduino] "${className}" [전송 데이터] ${decValue} (클래스 번호: "${data}")\n`); 
+                
                 lastSent = data;
             } catch (e) {
                 console.error("전송 에러:", e);
